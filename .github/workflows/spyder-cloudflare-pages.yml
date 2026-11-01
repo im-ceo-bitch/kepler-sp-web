@@ -1,0 +1,70 @@
+name: SPYDER Web — Cloudflare Pages
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'spyder-web-update*.zip'
+      - '.github/workflows/**'
+  workflow_run:
+    workflows: ['SPYDER Web — Unpack']
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  deployments: write
+
+concurrency:
+  group: spyder-cloudflare-pages-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # GITHUB_TOKEN cleanup commits intentionally do not trigger push workflows.
+    # workflow_run covers deployments immediately after successful ZIP extraction.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout latest main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+
+      - name: Validate website
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s site/index.html
+          test -s site/assets/styles.css
+          test -s site/assets/app.js
+          node --check site/assets/app.js
+          if grep -R --include='*.html' -En '(href|src)="(file:|javascript:)' site/; then
+            echo 'Unsafe local/JavaScript URLs detected.'
+            exit 1
+          fi
+          echo 'Static content validation passed.'
+
+      - name: Verify Cloudflare credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$CLOUDFLARE_API_TOKEN" || -z "$CLOUDFLARE_ACCOUNT_ID" ]]; then
+            echo 'Missing CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID GitHub Actions secret.'
+            exit 1
+          fi
+
+      - name: Deploy site/ to Cloudflare Pages (spyder-ac)
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy site --project-name=spyder-ac --branch=main
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
