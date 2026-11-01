@@ -1,19 +1,17 @@
 name: SPYDER Web — Cloudflare Pages
 
+# Deploy only after a successful unpack, or by explicit manual request.
+# No push event: even a bad ZIP cannot start a production deployment.
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - 'spyder-web-update*.zip'
-      - '.github/workflows/**'
   workflow_run:
-    workflows: ['SPYDER Web — Unpack']
-    types: [completed]
+    workflows:
+      - 'SPYDER Web — Unpack'
+    types:
+      - completed
   workflow_dispatch:
 
 permissions:
   contents: read
-  deployments: write
 
 concurrency:
   group: spyder-cloudflare-pages-production
@@ -21,13 +19,21 @@ concurrency:
 
 jobs:
   deploy:
-    # GITHUB_TOKEN cleanup commits intentionally do not trigger push workflows.
-    # workflow_run covers deployments immediately after successful ZIP extraction.
     if: >-
-      github.event_name != 'workflow_run' ||
-      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      # Set Settings → Secrets and variables → Actions → Variables
+      # CLOUDFLARE_PAGES_PROJECT if your actual Pages project is not spyder-ac.
+      CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT || 'spyder-ac' }}
+      CI: 'true'
+
     steps:
       - name: Checkout latest main
         uses: actions/checkout@v4
@@ -35,36 +41,104 @@ jobs:
           ref: main
           persist-credentials: false
 
-      - name: Validate website
+      - name: Validate website before deploy
         shell: bash
         run: |
           set -euo pipefail
-          test -s site/index.html
-          test -s site/assets/styles.css
-          test -s site/assets/app.js
+          shopt -s nullglob
+          pending=(spyder-web-update*.zip)
+          if (( ${#pending[@]} != 0 )); then
+            echo '::error::An update ZIP is still in main. Run the unpack workflow first; refusing to deploy.'
+            exit 1
+          fi
+          test -f site/index.html || { echo '::error::site/index.html missing'; exit 1; }
+          test -f scripts/validate_site.py || { echo '::error::scripts/validate_site.py missing'; exit 1; }
+          python3 scripts/validate_site.py
           node --check site/assets/app.js
-          if grep -R --include='*.html' -En '(href|src)="(file:|javascript:)' site/; then
-            echo 'Unsafe local/JavaScript URLs detected.'
-            exit 1
-          fi
-          echo 'Static content validation passed.'
+          echo 'Website validation passed.'
 
-      - name: Verify Cloudflare credentials
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Verify Pages project and token via Cloudflare API
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -z "$CLOUDFLARE_API_TOKEN" || -z "$CLOUDFLARE_ACCOUNT_ID" ]]; then
-            echo 'Missing CLOUDFLARE_API_TOKEN or CLOUDFLARE_ACCOUNT_ID GitHub Actions secret.'
+          if [[ -z "${CLOUDFLARE_API_TOKEN}" || -z "${CLOUDFLARE_ACCOUNT_ID}" ]]; then
+            echo '::error::Set GitHub Actions Secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID.'
             exit 1
           fi
+          python3 <<'PY'
+          import json
+          import os
+          import sys
+          from urllib.error import HTTPError, URLError
+          from urllib.parse import quote
+          from urllib.request import Request, urlopen
 
-      - name: Deploy site/ to Cloudflare Pages (spyder-ac)
-        uses: cloudflare/wrangler-action@v4
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy site --project-name=spyder-ac --branch=main
-          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          account = os.environ['CLOUDFLARE_ACCOUNT_ID'].strip()
+          project = os.environ['CLOUDFLARE_PAGES_PROJECT'].strip()
+          token = os.environ['CLOUDFLARE_API_TOKEN'].strip()
+          if not project:
+              print('::error::CLOUDFLARE_PAGES_PROJECT is empty')
+              sys.exit(1)
+          base = f'https://api.cloudflare.com/client/v4/accounts/{quote(account, safe="")}/pages/projects'
+
+          def get(url):
+              request = Request(url, headers={'Authorization': 'Bearer ' + token,
+                                              'Accept': 'application/json'})
+              try:
+                  with urlopen(request, timeout=25) as response:
+                      return response.status, json.load(response)
+              except HTTPError as exc:
+                  try:
+                      payload = json.loads(exc.read().decode('utf-8'))
+                  except (ValueError, UnicodeError):
+                      payload = {}
+                  return exc.code, payload
+              except (URLError, TimeoutError) as exc:
+                  print(f'::error::Cannot contact Cloudflare API: {exc}')
+                  sys.exit(1)
+
+          status, data = get(f'{base}/{quote(project, safe="")}')
+          if status == 200 and data.get('success') and isinstance(data.get('result'), dict):
+              result = data['result']
+              print('Cloudflare Pages project found:', result.get('name', project))
+              print('Pages production branch:', result.get('production_branch', 'not specified'))
+              print('Pages subdomain:', result.get('subdomain', 'not specified'))
+              source = result.get('source') or {}
+              print('Deployment source:', source.get('type', 'unknown'))
+              production = result.get('production_branch')
+              if production and production != 'main':
+                  print(f'::error::Pages production branch is "{production}", but this workflow deploys main. Set the project production branch to main in Cloudflare or update the workflow deliberately.')
+                  sys.exit(1)
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as file:
+                  file.write(f'Cloudflare Pages project verified: **{project}**.\n\n')
+              sys.exit(0)
+
+          print(f'::error::Cannot access Pages project "{project}" (HTTP {status}).')
+          for error in data.get('errors', []):
+              print(f'Cloudflare API error {error.get("code", "?")}: {error.get("message", "unknown error")}')
+          print('Possible causes: wrong project name, wrong Account ID, missing Pages:Edit token permission, or a Workers (not Pages) application.')
+          if status == 404 or status == 200:
+              list_status, listing = get(base + '?per_page=100')
+              if list_status == 200 and listing.get('success'):
+                  names = sorted(item.get('name', '?') for item in listing.get('result', []) if isinstance(item, dict))
+                  print('Pages projects visible to this API token:', ', '.join(names) if names else '(none)')
+                  print('If a different name appears, set repository variable CLOUDFLARE_PAGES_PROJECT to that exact name.')
+          sys.exit(1)
+          PY
+
+      - name: Deploy site to Cloudflare Pages
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Deploying validated site/ to Pages project ${CLOUDFLARE_PAGES_PROJECT}"
+          # Use Wrangler directly to expose its original Cloudflare error in this step,
+          # rather than reporting only the wrapper's generic 'npx exit code 1'.
+          npx --yes wrangler@4 pages deploy site \
+            --project-name="${CLOUDFLARE_PAGES_PROJECT}" \
+            --branch=main \
+            --commit-hash="$(git rev-parse HEAD)"
+          {
+            echo '### SPYDER Web deployed'
+            echo "Project: \`${CLOUDFLARE_PAGES_PROJECT}\`"
+            echo "Commit: \`$(git rev-parse --short HEAD)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
