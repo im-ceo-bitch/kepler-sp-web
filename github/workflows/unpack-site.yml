@@ -1,1 +1,119 @@
+name: Unpack site update
 
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site-update-*.zip'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: spider-site-unpack-main
+  cancel-in-progress: false
+
+jobs:
+  unpack:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Validate and unpack root ZIP updates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path, PurePosixPath
+          from zipfile import ZipFile
+          import shutil
+          import stat
+
+          root = Path.cwd().resolve()
+          archives = sorted(root.glob('site-update-*.zip'))
+          max_archive = 30 * 1024 * 1024
+          max_total_uncompressed = 80 * 1024 * 1024
+          max_single_file = 20 * 1024 * 1024
+          permitted_suffixes = {'.html', '.css', '.js', '.svg', '.png', '.jpg', '.jpeg', '.webp', '.ico', '.txt', '.json', '.webmanifest', '.woff', '.woff2'}
+          permitted_special = {'_headers', '_redirects'}
+
+          if not archives:
+              print('No site-update-*.zip archives in repository root; nothing to unpack.')
+
+          for archive in archives:
+              print(f'Checking {archive.name}')
+              if archive.stat().st_size > max_archive:
+                  raise RuntimeError(f'{archive.name}: ZIP exceeds 30 MiB')
+              with ZipFile(archive, 'r') as source:
+                  entries = source.infolist()
+                  if len(entries) > 1000:
+                      raise RuntimeError(f'{archive.name}: too many entries')
+                  total = 0
+                  validated = []
+                  for entry in entries:
+                      raw = entry.filename
+                      if (not raw or '\\' in raw or raw.startswith('/') or '\x00' in raw):
+                          raise RuntimeError(f'Unsafe path: {raw!r}')
+                      relative = PurePosixPath(raw)
+                      if any(part in ('', '.', '..') for part in raw.rstrip('/').split('/')):
+                          raise RuntimeError(f'Unsafe path: {raw!r}')
+                      if relative.parts[0] == 'public' and len(relative.parts) >= 2:
+                          if any(part.startswith('.') for part in relative.parts[1:]):
+                              raise RuntimeError(f'Hidden file/directory not permitted: {raw}')
+                          if relative.name == '_worker.js':
+                              raise RuntimeError('Cloudflare _worker.js is not allowed in static site updates')
+                          if not entry.is_dir() and relative.suffix.lower() not in permitted_suffixes and relative.name not in permitted_special:
+                              raise RuntimeError(f'Unsupported public asset type: {raw}')
+                      elif relative.as_posix() == 'README.md':
+                          pass
+                      elif relative.as_posix() == 'public' and entry.is_dir():
+                          pass
+                      else:
+                          raise RuntimeError(f'ZIP may only change public/ and README.md, got: {raw}')
+                      mode = (entry.external_attr >> 16) & 0xFFFF
+                      if stat.S_ISLNK(mode):
+                          raise RuntimeError(f'Symlinks are forbidden: {raw}')
+                      if not entry.is_dir():
+                          total += entry.file_size
+                          if entry.file_size > max_single_file or total > max_total_uncompressed:
+                              raise RuntimeError(f'ZIP uncompressed size limit exceeded at: {raw}')
+                          validated.append((entry, relative))
+
+                  for entry, relative in validated:
+                      destination = root.joinpath(*relative.parts)
+                      destination.parent.mkdir(parents=True, exist_ok=True)
+                      if not destination.parent.resolve().is_relative_to(root):
+                          raise RuntimeError(f'Path escapes repository: {relative}')
+                      if destination.is_symlink():
+                          raise RuntimeError(f'Refusing to overwrite symlink: {relative}')
+                      with source.open(entry, 'r') as src, destination.open('wb') as dst:
+                          shutil.copyfileobj(src, dst, length=1024 * 1024)
+                      print(f'Extracted {relative}')
+              archive.unlink()
+              print(f'Removed processed archive {archive.name}')
+
+          if archives and not (root / 'public' / 'index.html').is_file():
+              raise RuntimeError('public/index.html missing after extraction')
+          PY
+
+      - name: Commit extracted website and remove ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A -- .
+          if git diff --cached --quiet; then
+            echo 'Nothing changed.'
+            exit 0
+          fi
+          git commit -m 'chore(site): apply website ZIP update'
+          git push origin HEAD:main
