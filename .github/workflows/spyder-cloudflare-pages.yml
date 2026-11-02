@@ -58,58 +58,79 @@ jobs:
           python3 scripts/validate_site.py
           node --check site/assets/app.js
 
-      - name: Verify existing Worker and token permissions
+      - name: Verify token and diagnose Worker visibility
         shell: bash
         run: |
           set -euo pipefail
           if [[ -z "${CLOUDFLARE_API_TOKEN}" || -z "${CLOUDFLARE_ACCOUNT_ID}" ]]; then
-            echo '::error::GitHub Secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID are required.'
+            echo '::error::Both CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID must be defined as repository secrets.'
             exit 1
           fi
-          python3 <<'PY'
+          python3 <<'PYCODE'
           import json, os, sys
           from urllib.error import HTTPError, URLError
           from urllib.request import Request, urlopen
 
           account = os.environ['CLOUDFLARE_ACCOUNT_ID'].strip()
           token = os.environ['CLOUDFLARE_API_TOKEN'].strip()
-          name = os.environ['SPYDER_WORKER_NAME'].strip()
-          url = f'https://api.cloudflare.com/client/v4/accounts/{account}/workers/scripts'
-          request = Request(url, headers={
-              'Authorization': 'Bearer ' + token,
-              'Accept': 'application/json',
-          })
-          try:
-              with urlopen(request, timeout=30) as response:
-                  payload = json.load(response)
-                  status = response.status
-          except HTTPError as exc:
-              status = exc.code
+          worker = os.environ['SPYDER_WORKER_NAME'].strip()
+          if len(account) != 32:
+              print('::error::CLOUDFLARE_ACCOUNT_ID is not a 32-character Cloudflare Account ID.')
+              sys.exit(1)
+          print('Account ID suffix:', account[-6:])
+          print('Target Worker:', worker)
+
+          def query(path):
+              req = Request('https://api.cloudflare.com/client/v4' + path,
+                            headers={'Authorization': 'Bearer ' + token,
+                                     'Accept': 'application/json'})
               try:
-                  payload = json.loads(exc.read().decode('utf-8'))
+                  with urlopen(req, timeout=30) as response:
+                      status = response.status
+                      body = response.read()
+              except HTTPError as exc:
+                  status = exc.code
+                  body = exc.read()
+              try:
+                  result = json.loads(body)
               except (ValueError, UnicodeError):
-                  payload = {}
+                  result = {}
+              return status, result
+
+          try:
+              status, data = query('/user/tokens/verify')
           except (URLError, TimeoutError) as exc:
-              print(f'::error::Cloudflare API network error: {exc}')
+              print('::error::Cannot reach Cloudflare API:', exc)
               sys.exit(1)
-          if status != 200 or payload.get('success') is not True:
-              print(f'::error::Cannot list Cloudflare Workers (HTTP {status}).')
-              for item in payload.get('errors', []):
-                  print(f'Cloudflare API error {item.get("code", "?")}: {item.get("message", "unknown")}')
-              print('Check Account ID and token. A Pages-only token cannot deploy Workers.')
-              print('Grant Workers Scripts Edit / Workers Editor on the existing spider-ac Worker.')
+          if status != 200 or data.get('success') is not True or data.get('result', {}).get('status') != 'active':
+              print(f'::error::Cloudflare API token is not active (HTTP {status}).')
+              for err in data.get('errors') or []:
+                  print('API error', err.get('code'), err.get('message'))
               sys.exit(1)
-          result = payload.get('result') or []
-          if isinstance(result, dict):
-              result = result.get('scripts', [])
-          names = sorted({item.get('id') or item.get('name') for item in result if isinstance(item, dict)} - {None})
-          if name not in names:
-              print(f'::error::Worker "{name}" was not found in this Cloudflare account.')
-              print('Workers visible to token:', ', '.join(names) or '(none)')
-              print('Verify the Worker exists under Workers & Pages and the Account ID is correct.')
-              sys.exit(1)
-          print(f'Existing Cloudflare Worker verified: {name}')
-          PY
+          print('Cloudflare API token: active.')
+
+          try:
+              status, data = query(f'/accounts/{account}/workers/scripts')
+          except (URLError, TimeoutError) as exc:
+              print('::warning::Worker inventory request failed:', exc)
+          else:
+              scripts = data.get('result') or []
+              if isinstance(scripts, dict):
+                  scripts = scripts.get('scripts') or []
+              names = [i.get('id') or i.get('name') for i in scripts if isinstance(i, dict)]
+              if status == 200 and data.get('success') is True and worker in names:
+                  print(f'Worker {worker} is visible to the token.')
+              elif status == 200 and data.get('success') is True:
+                  # A per-Worker-scoped token can have limited list visibility.
+                  # Do not turn an empty list into a false 'Worker does not exist'.
+                  print(f'::warning::Worker {worker} is not present in the API list. This is not a definitive existence check.')
+                  print('Check the Account ID from Workers & Pages → Account Details, and token role Workers → Editor.')
+                  print('Workers returned by this token:', ', '.join(filter(None, names)) or '(none)')
+              else:
+                  print(f'::warning::Worker inventory returned HTTP {status}; Wrangler will report the deploy authorization result.')
+                  for err in data.get('errors') or []:
+                      print('API error', err.get('code'), err.get('message'))
+          PYCODE
 
       - name: Prepare Workers Static Assets deployment
         shell: bash
