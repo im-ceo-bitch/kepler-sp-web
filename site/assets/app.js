@@ -118,6 +118,35 @@
     });
     window.addEventListener('resize', () => {if(window.innerWidth>800)closeMenu();});
   }
+  // Search is entirely local; no user input or queries leave the browser.
+  const supportSearch = $('#support-search');
+  if (supportSearch) {
+    const items = $$('[data-support-item]');
+    const empty = $('#support-empty');
+    const count = $('#support-count');
+    const clear = $('#support-clear');
+    const normalize = value => value.toLocaleLowerCase().normalize('NFKC').trim();
+    const renderSupportSearch = () => {
+      const query = normalize(supportSearch.value);
+      let visible = 0;
+      for (const item of items) {
+        const match = !query || normalize(item.textContent).includes(query);
+        item.hidden = !match;
+        if (match) visible++;
+        if (!match) item.open = false;
+      }
+      if (empty) empty.hidden = visible !== 0;
+      if (count) count.textContent = language === 'ru' ? `${visible} из ${items.length}` : `${visible} of ${items.length}`;
+      if (clear) clear.hidden = supportSearch.value.length === 0;
+      supportSearch.placeholder = supportSearch.dataset[language === 'ru' ? 'placeholderRu' : 'placeholderEn'];
+      if (clear) clear.setAttribute('aria-label', language === 'ru' ? 'Очистить поиск' : 'Clear search');
+    };
+    supportSearch.addEventListener('input', renderSupportSearch);
+    clear?.addEventListener('click', () => {supportSearch.value = '';renderSupportSearch();supportSearch.focus();});
+    $$('[data-lang]').forEach(button => button.addEventListener('click',renderSupportSearch));
+    renderSupportSearch();
+  }
+
   const year = $('#year');
   if(year) year.textContent = String(new Date().getFullYear());
 

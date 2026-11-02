@@ -3,7 +3,7 @@
 from pathlib import Path
 from html.parser import HTMLParser
 from urllib.parse import unquote, urlsplit
-import re, subprocess, sys
+import re, subprocess, sys, xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 SITE = ROOT / 'site'
@@ -11,11 +11,12 @@ ERRORS = []
 class Scan(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
-        self.ids=set();self.links=[];self.lang='';self.h1=0;self.img=0;self.assets=[];self.titles=0
+        self.ids=set();self.links=[];self.lang='';self.h1=0;self.img=0;self.assets=[];self.titles=0;self.canonical='' 
     def handle_starttag(self,tag,raw):
         a=dict(raw)
         if tag=='html':self.lang=a.get('lang','')
         if tag=='title':self.titles+=1
+        if tag=='link' and a.get('rel')=='canonical':self.canonical=a.get('href','')
         if tag=='h1':self.h1+=1
         if 'id' in a:
             if a['id'] in self.ids:ERRORS.append(f'duplicate HTML ID {a["id"]!r}')
@@ -40,6 +41,8 @@ for path in htmls:
     if scan.h1!=1:ERRORS.append(f'{path.name}: expected exactly one h1, got {scan.h1}')
     if scan.titles!=1:ERRORS.append(f'{path.name}: expected exactly one title')
     if scan.lang not in ('en','ru'):ERRORS.append(f'{path.name}: bad HTML language')
+    if path.name!='404.html' and scan.canonical != ('https://spyder.ac/' if path.name=='index.html' else f'https://spyder.ac/{path.name}'):
+        ERRORS.append(f'{path.name}: wrong/missing canonical URL')
     for tag,target in scan.links:
         url=urlsplit(target)
         if url.scheme in ('https','mailto','tel'):continue
@@ -57,7 +60,15 @@ for path in htmls:
             if linked not in all_ids:
                 other=Scan();other.feed(linked.read_text(encoding='utf-8'));all_ids[linked]=other.ids
             if unquote(url.fragment) not in all_ids[linked]:ERRORS.append(f'{path.name}: missing anchor {target!r}')
-for mandatory in ('assets/styles.css','assets/app.js','sitemap.xml','robots.txt','_headers'):
+try:
+    sitemap = ET.parse(SITE/'sitemap.xml').getroot()
+    smurls = {node.text for node in sitemap.iter() if node.tag.endswith('}loc')}
+    pageurls = {'https://spyder.ac/' if p.name=='index.html' else 'https://spyder.ac/'+p.name for p in htmls if p.name!='404.html'}
+    if smurls!=pageurls:
+        ERRORS.append(f'sitemap mismatch: missing {sorted(pageurls-smurls)}, extra {sorted(smurls-pageurls)}')
+except (ET.ParseError, OSError, ValueError) as exc:
+    ERRORS.append(f'sitemap.xml invalid: {exc}')
+for mandatory in ('assets/styles.css' ,'assets/app.js','sitemap.xml','robots.txt','_headers'):
     if not (SITE/mandatory).is_file():ERRORS.append(f'missing {mandatory}')
 js=SITE/'assets/app.js'
 if js.is_file():

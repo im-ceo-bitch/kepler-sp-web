@@ -1,22 +1,25 @@
-# SPYDER Web v2 — 2026-11-01
+# SPYDER Web v3 — 2026-11-02
 
-Based on the user's current `kepler-sp-web-main.zip` (the v1 website and existing Actions workflows). No existing product pages or assets were deleted.
+Base: user-supplied current `kepler-sp-web-main 2.zip` (Website v2), not the previous v1 archive. Existing web pages, graphic assets and the Cloudflare Worker target are preserved.
 
-## Improvements
+## Deliverables
 
-- Three navigable, brand-consistent product pages: Wallet, Network and Chain/SPD, plus a dedicated Security Center and a branded 404.
-- Main page: premium three-card product gallery, navigable ecosystem nodes, direct security-center CTA and enhanced details.
-- RU/EN language switching on every page, with local preference persistence; legal pages show the selected language instead of two consecutive translations.
-- Accessibility: keyboard-operable ARIA tabs, inert hidden mobile navigation, Escape to close, active navigation section indication, reduced-motion preferences, correct disabled tab panel semantics.
-- Refinements: subtle orbital movement, pointer-responsive device, header progress indicator, scroll reveals, improved product layouts, mobile breakpoints down to 320px.
-- SEO: canonical links, social card metadata, expanded sitemap.
-- Added dependency-free static HTML/link/assets/anchor and JavaScript syntax validator.
-- Actions: validation before the ZIP-apply commit, and deploy gating to avoid publishing a pending or invalid release. Workflows are supplied separately, not inside the ZIP.
+- Tangem-inspired premium addition on the home page: three high-contrast product principle panels with EN/RU descriptions and a verified-availability CTA.
+- New `/download.html`: mobile and desktop product-availability page, iOS and Android platform panels, a premium device visualization, and a three-step safe-download guide. No unverified store URLs or invented release claims.
+- New `/support.html`: self-service help center with nine EN/RU safety and product answers, client-only instant search, clear search, count, keyboard-friendly disclosure questions and safe-usage notice.
+- Existing internal product pages and main CTAs now link to the new availability and support destinations. The product-page generator was updated so running it no longer removes these links.
+- Search Engine sitemap updated, SEO canonical and internal link coverage expanded, asset browser cache reduced to 5 minutes (files are not fingerprinted).
+- Static validator now also checks canonical links and sitemap completeness.
+- Separate **updated unzip workflow** runs static validation before any site update commit. Worker deploy workflow remains unchanged and still targets existing Worker `spider-ac`.
 
-## Known limits
+## Local validation
 
-The website is a static presentation, not a browser wallet. There are no verified app-store installation destinations, RPC endpoints, mainnet telemetry or independent audits shown. Illustrative wallet UI is not an actual runtime screenshot. The reviewed website notices still need operator details and legal assessment for a full public commercial release.
+- Static validation: 10 HTML pages, links, assets, translations, anchors, canonical URLs, sitemap, JS syntax.
+- Playwright Chromium with `page.set_content`: UI and JS at 320, 390, 768, 1440 pixels on Home, Wallet, Download, Support. No JS errors or horizontal overflow; interactive help search, RU language and mobile menu confirmed.
+- ZIP archive verified for its content paths; clean-overlay test on the exact supplied base and post-overlay validator.
 
-## Local checks
+## Limits
 
-Tested HTML reference/anchor validator and Node JS syntax check; Playwright Chromium set-content harness at 1440 / 390 / 320px across the main page and 1440 / 390px across all product pages, testing interactive tabs, RU locale, mobile-menu/keyboard handling, and horizontal overflow. GitHub Actions and Cloudflare production deployment require the user's account and were not executed locally.
+- No real Xcode/iOS runtime screenshots were generated. Website product mockups are illustrative and show no fabricated funds.
+- Workflows and Cloudflare deployment were not run on GitHub or in the Cloudflare account here; token, domain, bot permissions and live production remain to be verified by GitHub/Cloudflare.
+- Legal documents are preliminary website notices, not legal sign-off for a regulated financial service.
