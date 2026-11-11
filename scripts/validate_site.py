@@ -21,7 +21,7 @@ class Scan(HTMLParser):
         if 'id' in a:
             if a['id'] in self.ids:ERRORS.append(f'duplicate HTML ID {a["id"]!r}')
             self.ids.add(a['id'])
-        if ('data-en' in a) != ('data-ru' in a):ERRORS.append(f'{tag} missing one translation attribute')
+        if any('data-'+lang in a for lang in ('en','ru','uz')) and not all('data-'+lang in a for lang in ('en','ru','uz')):ERRORS.append(f'{tag} missing an EN/RU/UZ translation')
         if tag=='img':
             self.img+=1
             if 'alt' not in a:ERRORS.append('image missing alt')
@@ -40,7 +40,7 @@ for path in htmls:
     all_ids[path]=scan.ids
     if scan.h1!=1:ERRORS.append(f'{path.name}: expected exactly one h1, got {scan.h1}')
     if scan.titles!=1:ERRORS.append(f'{path.name}: expected exactly one title')
-    if scan.lang not in ('en','ru'):ERRORS.append(f'{path.name}: bad HTML language')
+    if scan.lang not in ('en','ru','uz'):ERRORS.append(f'{path.name}: bad HTML language')
     if path.name!='404.html' and scan.canonical != ('https://spyder.ac/' if path.name=='index.html' else f'https://spyder.ac/{path.name}'):
         ERRORS.append(f'{path.name}: wrong/missing canonical URL')
     for tag,target in scan.links:
@@ -68,10 +68,9 @@ try:
         ERRORS.append(f'sitemap mismatch: missing {sorted(pageurls-smurls)}, extra {sorted(smurls-pageurls)}')
 except (ET.ParseError, OSError, ValueError) as exc:
     ERRORS.append(f'sitemap.xml invalid: {exc}')
-for mandatory in ('assets/styles.css' ,'assets/app.js','sitemap.xml','robots.txt','_headers'):
+for mandatory in ('assets/styles.css' ,'assets/app.js','assets/site-config.js','sitemap.xml','robots.txt','_headers'):
     if not (SITE/mandatory).is_file():ERRORS.append(f'missing {mandatory}')
-js=SITE/'assets/app.js'
-if js.is_file():
+for js in sorted((SITE/'assets').glob('*.js')):
     try:subprocess.run(['node','--check',str(js)],check=True,capture_output=True,text=True)
     except FileNotFoundError:print('Note: node unavailable; JS syntax check deferred')
     except subprocess.CalledProcessError as exc:ERRORS.append('JavaScript syntax: '+exc.stderr)
@@ -79,4 +78,4 @@ if ERRORS:
     print('FAIL: website validation errors:')
     for err in ERRORS:print(' -',err)
     sys.exit(1)
-print(f'PASS: {len(htmls)} HTML pages, internal links, fragments, translations, assets and JS syntax')
+print(f'PASS: {len(htmls)} HTML pages, internal links, fragments, EN/RU/UZ translations, assets and JS syntax')

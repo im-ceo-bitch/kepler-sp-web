@@ -1,194 +1,181 @@
-/* SPYDER Website — progressive enhancements; zero third-party scripts. */
+/* SPYDER v4 · no network calls, external scripts or real transactions */
 (() => {
   'use strict';
-  const $ = (selector, root = document) => root.querySelector(selector);
-  const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
-  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
-  const translations = {
-    wallet: {
-      number: {en:'01 — WALLET',ru:'01 — КОШЕЛЁК'},
-      title: {en:'Your assets, in focus.',ru:'Активы под контролем.'},
-      desc: {en:'A calm, clear place to view your portfolio, explore assets and follow your activity.',ru:'Простое пространство для просмотра портфеля, активов и истории операций.'},
-      device: {en:'Wallet overview',ru:'Обзор кошелька'}
-    },
-    messages: {
-      number: {en:'02 — MESSAGES',ru:'02 — СООБЩЕНИЯ'},
-      title: {en:'Conversations, connected.',ru:'Общение, которое объединяет.'},
-      desc: {en:'Messages designed for the SPYDER experience. The interface is a product preview, not a live messaging service.',ru:'Сообщения, задуманные как часть SPYDER. Интерфейс демонстрационный: это не действующий веб-мессенджер.'},
-      device: {en:'Messages preview',ru:'Превью сообщений'}
-    },
-    touch: {
-      number: {en:'03 — TOUCH',ru:'03 — TOUCH'},
-      title: {en:'A gesture toward the future.',ru:'Новое взаимодействие.'},
-      desc: {en:'SPYDER Touch explores simple ways to connect. The animation demonstrates a concept rather than an available transfer method.',ru:'Spyder Touch исследует простые способы взаимодействия. Анимация показывает концепцию, а не доступный способ перевода.'},
-      device: {en:'SPYDER Touch',ru:'SPYDER Touch'}
-    }
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const languages = ['en','ru','uz'];
+  let lang = 'en';
+  let stage = 'start';
+  let amount = 25;
+  let network = 'Polygon';
+  let touchConnected = false;
+  let transferTimer;
+  let touchTimer;
+  const words = {
+    invalid: ['Enter an amount from 0.01 to 1,850 USDC, with up to two decimal places.','Введите сумму от 0,01 до 1 850 USDC, не более двух знаков после запятой.','0,01 dan 1 850 USDC gacha, ko‘pi bilan ikki kasr xonali summa kiriting.'],
+    sending: ['Simulating…','Симуляция…','Simulyatsiya…'],
+    found: ['questions found','вопросов найдено','ta savol topildi'],
+    available: ['Official download available','Официальная ссылка доступна','Rasmiy havola mavjud'],
+    touchIdle: ['Two people. One connection.','Два человека. Одна связь.','Ikki inson. Bitta aloqa.'],
+    touchBusy: ['Bringing you closer…','Становимся ближе…','Yaqinlashmoqda…'],
+    touchDone: ['Connected in the demo. No devices were paired.','Связь в демо. Устройства не сопрягались.','Demoda bog‘landi. Qurilmalar ulanmagan.'],
+    touchReplay: ['Play again','Повторить','Qayta ko‘rish']
   };
-  let language = 'en';
-  let activeTab = 'wallet';
-  let hiddenBalance = false;
-
-  function applyTab() {
-    const data = translations[activeTab];
-    if (!data || !$('#demo-title')) return;
-    for (const [id, key] of [['#demo-number','number'],['#demo-title','title'],['#demo-desc','desc'],['#device-head','device']]) {
-      const target = $(id);
-      if (target) target.textContent = data[key][language];
+  const tr = key => words[key][languages.indexOf(lang)];
+  const fmt = value => new Intl.NumberFormat(lang === 'uz' ? 'uz-UZ' : lang, {maximumFractionDigits:2}).format(value);
+  function updateReview() {
+    if (!$('#review-amount')) return;
+    $('#review-amount').textContent = `${fmt(amount)} USDC`;
+    $('#review-network').textContent = network;
+    $('#review-fee').textContent = network === 'Polygon' ? '0.001 POL' : '0.0003 ETH';
+    $('#receipt-amount').textContent = `${fmt(amount)} USDC`;
+    $('#receipt-network').textContent = network;
+  }
+  function supportSearch() {
+    const input = $('#support-search');
+    if (!input) return;
+    const normalize = x => x.toLocaleLowerCase().normalize('NFKC').replace(/[’‘`]/g,"'");
+    const q = normalize(input.value.trim());
+    let count = 0;
+    $$('[data-faq]').forEach(item => {
+      const match = normalize(item.textContent).includes(q);
+      item.hidden = !match;
+      if (match) count++;
+    });
+    $('#support-empty').hidden = count > 0;
+    $('#support-count').textContent = `${count} ${tr('found')}`;
+  }
+  const config = window.SPYDER_CONFIG || {};
+  function safeUrl(raw, platform) {
+    if (typeof raw !== 'string' || !raw.trim()) return null;
+    try {
+      const url = new URL(raw);
+      if (url.username || url.password) return null;
+      if (platform === 'support' && url.protocol === 'mailto:' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(url.pathname)) return url.href;
+      if (url.protocol !== 'https:') return null;
+      if (platform === 'ios' && !['apps.apple.com','testflight.apple.com'].includes(url.hostname)) return null;
+      if (platform === 'android' && url.hostname !== 'play.google.com') return null;
+      return url.href;
+    } catch (_) { return null; }
+  }
+  function applyDestinations() {
+    for (const platform of ['ios','android']) {
+      const url = safeUrl(config[`${platform}Url`], platform);
+      const a = $(`[data-platform-link="${platform}"]`);
+      const status = $(`[data-platform-status="${platform}"]`);
+      if (a && url) { a.href = url; a.hidden = false; a.rel = 'noopener noreferrer'; if(status) status.textContent = tr('available'); }
     }
-    $$('.feature-tab').forEach(tab => {
-      const isSelected = tab.dataset.tab === activeTab;
-      tab.classList.toggle('active',isSelected);
-      tab.setAttribute('aria-selected',String(isSelected));
-      tab.tabIndex = isSelected ? 0 : -1;
-    });
-    $$('.demo-screen').forEach(screen => {
-      const shown = screen.dataset.screen === activeTab;
-      screen.classList.toggle('active',shown);
-      screen.hidden = !shown;
-      screen.setAttribute('aria-hidden',String(!shown));
-    });
-    const shell = $('#demo-shell');
-    if (shell) shell.dataset.mode = activeTab;
+    const supportUrl = safeUrl(config.supportUrl, 'support');
+    const contact = $('[data-contact-link]');
+    if (supportUrl && contact) { contact.href = supportUrl; contact.hidden = false; $('[data-contact-pending]').hidden = true; }
   }
-  function setLanguage(next) {
-    if (!['en','ru'].includes(next)) return;
-    language = next;
-    document.documentElement.lang = next;
-    $$('[data-en][data-ru]').forEach(el => {el.textContent = el.dataset[next];});
-    $$('[data-only-language]').forEach(el => {el.hidden = el.dataset.onlyLanguage !== next;});
-    $$('.lang').forEach(button => {
-      const active = button.dataset.lang === next;
-      button.classList.toggle('active',active);
-      button.setAttribute('aria-pressed',String(active));
-    });
-    if (document.body.dataset.titleEn) document.title = document.body.dataset[next === 'ru' ? 'titleRu' : 'titleEn'];
-    applyTab();
-    try { localStorage.setItem('spyder-site-lang', next); } catch (_) { /* storage can be disabled */ }
+  function setLanguage(value) {
+    lang = languages.includes(value) ? value : 'en';
+    document.documentElement.lang = lang;
+    $$('[data-en][data-ru][data-uz]').forEach(el => { el.textContent = el.dataset[lang]; });
+    document.title = document.body.dataset[`title${lang[0].toUpperCase()+lang.slice(1)}`] || document.title;
+    if ($('#language')) $('#language').value = lang;
+    try { localStorage.setItem('spyder-site-lang',lang); } catch (_) {}
+    updateReview(); supportSearch(); applyDestinations();
+    if ($('#amount-error') && !$('#amount-error').hidden) $('#amount-error').textContent = tr('invalid');
+    if (stage === 'sending') $('#confirm-transfer').textContent = tr('sending');
+    if (touchConnected) { $('#touch-status').textContent = tr('touchDone'); $('#touch-play').textContent = tr('touchReplay'); }
   }
-  const tabButtons = $$('.feature-tab');
-  tabButtons.forEach((tab, index) => {
-    tab.addEventListener('click',() => { activeTab = tab.dataset.tab; applyTab(); });
-    tab.addEventListener('keydown',event => {
-      let newIndex = index;
-      if (event.key === 'ArrowRight') newIndex = (index + 1) % tabButtons.length;
-      else if (event.key === 'ArrowLeft') newIndex = (index + tabButtons.length - 1) % tabButtons.length;
-      else if (event.key === 'Home') newIndex = 0;
-      else if (event.key === 'End') newIndex = tabButtons.length - 1;
-      else return;
-      event.preventDefault();
-      tabButtons[newIndex].focus();tabButtons[newIndex].click();
-    });
-  });
-  $$('.lang[data-lang]').forEach(button => button.addEventListener('click', () => setLanguage(button.dataset.lang)));
-  let savedLanguage = 'en';
-  try { if (localStorage.getItem('spyder-site-lang') === 'ru') savedLanguage = 'ru'; } catch (_) {}
-  setLanguage(savedLanguage);
-
-  const balanceToggle = $('#balance-toggle');
-  if (balanceToggle) balanceToggle.addEventListener('click',() => {
-    hiddenBalance = !hiddenBalance;
-    $('#balance-amount').textContent = hiddenBalance ? '••••••' : '—';
-    balanceToggle.setAttribute('aria-pressed',String(hiddenBalance));
-    balanceToggle.setAttribute('aria-label', hiddenBalance ? (language === 'ru' ? 'Показать превью баланса' : 'Reveal preview balance') : (language === 'ru' ? 'Скрыть превью баланса' : 'Hide preview balance'));
-  });
-
-  const menuToggle = $('#mobile-toggle');
+  let preference;
+  try { preference = localStorage.getItem('spyder-site-lang'); } catch (_) {}
+  const browserLanguage = (navigator.language || 'en').slice(0,2);
+  setLanguage(languages.includes(preference) ? preference : languages.includes(browserLanguage) ? browserLanguage : 'en');
+  $('#language')?.addEventListener('change', e => setLanguage(e.target.value));
+  $('#support-search')?.addEventListener('input',supportSearch);
+  if ($('#year')) $('#year').textContent = new Date().getFullYear();
+  // Accessible mobile navigation: native tab order, Escape and outside-click close.
   const menu = $('#mobile-menu');
-  const closeMenu = () => {
-    document.body.classList.remove('menu-open');
-    if (!menuToggle) return;
-    menuToggle.setAttribute('aria-expanded','false');
-    menuToggle.setAttribute('aria-label',language === 'ru' ? 'Открыть меню' : 'Open menu');
-    if (menu) menu.setAttribute('inert','');
-  };
-  if (menuToggle && menu) {
-    menu.setAttribute('inert','');
-    menuToggle.addEventListener('click',() => {
-      const opening = !document.body.classList.contains('menu-open');
-      document.body.classList.toggle('menu-open',opening);
-      menuToggle.setAttribute('aria-expanded',String(opening));
-      menuToggle.setAttribute('aria-label',opening ? (language === 'ru' ? 'Закрыть меню' : 'Close menu') : (language === 'ru' ? 'Открыть меню' : 'Open menu'));
-      if (opening) {menu.removeAttribute('inert'); $('a',menu)?.focus();}
-      else menu.setAttribute('inert','');
-    });
-    $$('a',menu).forEach(a => a.addEventListener('click',closeMenu));
-    document.addEventListener('keydown',e => {if(e.key==='Escape' && document.body.classList.contains('menu-open')){closeMenu();menuToggle.focus();}});
-    document.addEventListener('click',e => {
-      if (document.body.classList.contains('menu-open') && !menu.contains(e.target) && !menuToggle.contains(e.target)) closeMenu();
-    });
-    window.addEventListener('resize', () => {if(window.innerWidth>800)closeMenu();});
+  const menuButton = $('.menu-btn');
+  function closeMenu(returnFocus = false) {
+    if (!menu || !menuButton) return;
+    menu.hidden = true; menuButton.setAttribute('aria-expanded','false');
+    if (returnFocus) menuButton.focus();
   }
-  // Search is entirely local; no user input or queries leave the browser.
-  const supportSearch = $('#support-search');
-  if (supportSearch) {
-    const items = $$('[data-support-item]');
-    const empty = $('#support-empty');
-    const count = $('#support-count');
-    const clear = $('#support-clear');
-    const normalize = value => value.toLocaleLowerCase().normalize('NFKC').trim();
-    const renderSupportSearch = () => {
-      const query = normalize(supportSearch.value);
-      let visible = 0;
-      for (const item of items) {
-        const match = !query || normalize(item.textContent).includes(query);
-        item.hidden = !match;
-        if (match) visible++;
-        if (!match) item.open = false;
+  menuButton?.addEventListener('click', () => {
+    const open = menu.hidden; menu.hidden = !open;
+    menuButton.setAttribute('aria-expanded',String(open));
+    if (open) $('a',menu)?.focus();
+  });
+  document.addEventListener('keydown',event => {if(event.key === 'Escape' && menu && !menu.hidden) closeMenu(true);});
+  document.addEventListener('click', event => {if(menu && !menu.hidden && !menu.contains(event.target) && !menuButton.contains(event.target)) closeMenu();});
+  $$('a',menu || document).forEach(a => a.addEventListener('click',() => closeMenu()));
+  window.addEventListener('resize', () => { if(window.innerWidth>820) closeMenu(); });
+  // Transfer state machine. All values remain in this document's memory.
+  function showStage(next, focus = true) {
+    stage = next;
+    const ids = {start:'demo-start',compose:'transfer-compose',review:'transfer-review',sending:'transfer-review',success:'demo-success'};
+    for (const id of new Set(Object.values(ids))) { if ($('#'+id)) $('#'+id).hidden = id !== ids[next]; }
+    $('#transfer-receipt').hidden = next !== 'success';
+    const step = next === 'start' ? 1 : next === 'compose' ? 2 : 3;
+    $$('.demo-steps li').forEach(li => { li.classList.toggle('active',Number(li.dataset.step)<=step); if(Number(li.dataset.step) === step) li.setAttribute('aria-current','step'); else li.removeAttribute('aria-current'); });
+    if (focus) {
+      const target = {start:'#open-transfer',compose:'#transfer-amount',review:'#confirm-transfer',success:'#try-again'}[next];
+      if (target) $(target).focus({preventScroll:true});
+    }
+  }
+  function resetDemo() {
+    clearTimeout(transferTimer);
+    amount = 25; network = 'Polygon';
+    $('#transfer-amount').value = '25'; $('#transfer-network').value = 'Polygon';
+    $('#amount-error').hidden = true; $('#transfer-amount').removeAttribute('aria-invalid');
+    $('#confirm-transfer').disabled = false;
+    // Restore the localized span if a previous sending state replaced it.
+    restoreConfirm(); updateReview(); showStage('start');
+  }
+  const confirmText = ['Send demo transfer','Выполнить демо-перевод','Demo o‘tkazmani yuborish'];
+  function restoreConfirm() {
+    const button = $('#confirm-transfer');
+    if (!button) return;
+    button.replaceChildren();
+    const span = document.createElement('span');
+    languages.forEach((l,i) => { span.dataset[l] = confirmText[i]; });
+    span.textContent = confirmText[languages.indexOf(lang)]; button.append(span); button.disabled = false;
+  }
+  if ($('#open-transfer')) {
+    $('#open-transfer').addEventListener('click',() => showStage('compose'));
+    $('#close-transfer').addEventListener('click',() => showStage('start'));
+    $('#edit-transfer').addEventListener('click',() => { clearTimeout(transferTimer); restoreConfirm(); showStage('compose'); });
+    $('#demo-reset').addEventListener('click',resetDemo);
+    $('#try-again').addEventListener('click',resetDemo);
+    $$('[data-amount]').forEach(button => button.addEventListener('click',() => {
+      $('#transfer-amount').value = button.dataset.amount;
+      $('#amount-error').hidden = true; $('#transfer-amount').removeAttribute('aria-invalid');
+    }));
+    $('#transfer-amount').addEventListener('input',() => {$('#amount-error').hidden = true;$('#transfer-amount').removeAttribute('aria-invalid');});
+    $('#transfer-amount').addEventListener('keydown',e => {if(e.key === 'Enter') $('#review-transfer').click();});
+    $('#review-transfer').addEventListener('click',() => {
+      const raw = $('#transfer-amount').value.trim().replace(',','.');
+      const number = Number(raw);
+      if (!/^\d+(?:\.\d{1,2})?$/.test(raw) || !Number.isFinite(number) || number < .01 || number > 1850) {
+        $('#amount-error').hidden = false; $('#amount-error').textContent = tr('invalid');
+        $('#transfer-amount').setAttribute('aria-invalid','true'); $('#transfer-amount').focus({preventScroll:true}); return;
       }
-      if (empty) empty.hidden = visible !== 0;
-      if (count) count.textContent = language === 'ru' ? `${visible} из ${items.length}` : `${visible} of ${items.length}`;
-      if (clear) clear.hidden = supportSearch.value.length === 0;
-      supportSearch.placeholder = supportSearch.dataset[language === 'ru' ? 'placeholderRu' : 'placeholderEn'];
-      if (clear) clear.setAttribute('aria-label', language === 'ru' ? 'Очистить поиск' : 'Clear search');
-    };
-    supportSearch.addEventListener('input', renderSupportSearch);
-    clear?.addEventListener('click', () => {supportSearch.value = '';renderSupportSearch();supportSearch.focus();});
-    $$('[data-lang]').forEach(button => button.addEventListener('click',renderSupportSearch));
-    renderSupportSearch();
-  }
-
-  const year = $('#year');
-  if(year) year.textContent = String(new Date().getFullYear());
-
-  // Scroll-progress indicator and active navigation: lightweight, no dependencies.
-  const progress = $('#scroll-progress');
-  const navLinks = $$('.nav-links a[href^="#"]');
-  const sections = navLinks.map(a => ({anchor:a, target: $(a.getAttribute('href'))})).filter(x=>x.target);
-  let pendingScrollFrame = false;
-  function onScroll(){
-    if(pendingScrollFrame)return;
-    pendingScrollFrame = true;
-    requestAnimationFrame(()=>{
-      const max = document.documentElement.scrollHeight - window.innerHeight;
-      if(progress) progress.style.transform = `scaleX(${max>0 ? Math.max(0,Math.min(1,window.scrollY/max)) : 0})`;
-      let active = null;
-      for(const item of sections){if(item.target.getBoundingClientRect().top <= 145)active=item.anchor;}
-      navLinks.forEach(anchor=>{anchor.classList.toggle('current',anchor===active);if(anchor===active)anchor.setAttribute('aria-current','location');else anchor.removeAttribute('aria-current');});
-      pendingScrollFrame = false;
+      amount = Math.round(number*100)/100; network = $('#transfer-network').value;
+      updateReview(); showStage('review');
     });
-  }
-  window.addEventListener('scroll',onScroll,{passive:true});
-  window.addEventListener('resize',onScroll,{passive:true});onScroll();
-
-  if('IntersectionObserver' in window && !reducedMotion.matches){
-    const observer = new IntersectionObserver(entries => {
-      entries.forEach(entry => { if(entry.isIntersecting){entry.target.classList.add('in-view');observer.unobserve(entry.target);} });
-    },{threshold:.04,rootMargin:'0px 0px -20px 0px'});
-    $$('.reveal').forEach(el=>observer.observe(el));
-    // Make non-observed content visible when JS is available but IO is slow.
-    document.documentElement.classList.add('enhanced');
-  } else $$('.reveal').forEach(el=>el.classList.add('in-view'));
-
-  // Hero interaction is purely visual; the actual wallet remains a mobile product.
-  const heroArt = $('#hero-art');
-  if(heroArt && !reducedMotion.matches && window.matchMedia('(pointer:fine)').matches){
-    heroArt.addEventListener('pointermove',e => {
-      const bounds=heroArt.getBoundingClientRect();
-      const x = (e.clientX-bounds.left)/bounds.width-.5;
-      const y = (e.clientY-bounds.top)/bounds.height-.5;
-      heroArt.style.setProperty('--pointer-x',`${(x*10).toFixed(2)}px`);
-      heroArt.style.setProperty('--pointer-y',`${(y*9).toFixed(2)}px`);
+    $('#confirm-transfer').addEventListener('click', () => {
+      if (stage !== 'review') return;
+      stage = 'sending'; $('#confirm-transfer').disabled = true; $('#confirm-transfer').textContent = tr('sending');
+      transferTimer = setTimeout(() => {restoreConfirm();showStage('success');}, motion.matches ? 0 : 650);
     });
-    heroArt.addEventListener('pointerleave',()=>{heroArt.style.setProperty('--pointer-x','0px');heroArt.style.setProperty('--pointer-y','0px');});
+    showStage('start',false);
   }
+  // A scene, not a device pairing or payment capability.
+  $('#touch-play')?.addEventListener('click', () => {
+    clearTimeout(touchTimer); touchConnected = false;
+    const art = $('#touch-art'); const button = $('#touch-play');
+    art.classList.remove('is-connected'); button.disabled = true;
+    $('#touch-status').textContent = tr('touchBusy');
+    touchTimer = setTimeout(() => {
+      art.classList.add('is-connected'); touchConnected = true;
+      $('#touch-status').textContent = tr('touchDone');
+      button.textContent = tr('touchReplay'); button.disabled = false;
+    }, motion.matches ? 0 : 180);
+  });
 })();
