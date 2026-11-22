@@ -1,69 +1,60 @@
-# SPYDER web — v4
+# Spyder Network — Public Website (v6.0.0)
 
-A static, trilingual product site focused on Wallet + Chats. No build dependencies, bundler, backend, third-party requests, tracking or web-wallet integration.
+**Official public research presence** for Spyder Network, SpyderChain, SpyderCoin (SPD) and Spyder Wallet.
 
-## Update through the existing ZIP workflow
+- Main public website: **https://spyder.ac/** (target custom domain)
+- Separate SpyderChain domain owned by the project: **spyderchain.org** (routing/deployment is separate, and is not changed by this update)
+- Whitepaper repository: https://github.com/im-ceo-bitch/spyder-network-whitepaper
+- Archived Whitepaper: https://zenodo.org/records/24435471
+- DOI v0.2.0: https://doi.org/10.5281/zenodo.24435471
+- Concept DOI: https://doi.org/10.5281/zenodo.24435470
+- Whitepaper author: **Aziz Kodirov**; published 2026-11-22
+- Whitepaper license: **CC BY-NC-ND 4.0**; does **not** automatically license the website/code/marks.
 
-1. Upload `spyder-web-update-v4.zip` to the repository root on `main`.
-2. Keep exactly one `spyder-web-update*.zip` in the root. Remove an old pending update before uploading this one.
-3. The existing `SPYDER Web — Unpack` workflow overlays the archive, commits the content and removes the ZIP.
-4. The existing Cloudflare Worker workflow validates and deploys the resulting site. Check that both workflow runs finish successfully.
+> The site is **research-stage disclosure**. Model M-01, proposed emission, roadmap and validator economics are hypothetical. This website does not announce a public mainnet, token sale, exchange listing, registered trademark, independently verified audit or guaranteed SPD returns.
 
-The archive contains root-relative `site/`, `scripts/`, `README.md`, and `RELEASE_NOTES.md` paths. It has no enclosing export folder, `.github/` files or dependencies. Existing workflows, Worker name `spider-ac`, secrets and domain routing remain unchanged. It is compatible with the unpack workflow in the supplied repository. Local checks do not establish successful production deployment.
+## Contents
 
-## What changed
+13 responsive pages: overview, chain, coin, wallet, ecosystem, research/DOI, roadmap, security, app availability, questions, privacy, terms and 404. English/Russian/Uzbek Latin language switching. A non-transactional tokenomics fee stress-test, local language preference and accessible mobile navigation. No third-party libraries, analytics, backend, API keys, wallet links or real payments.
 
-- Complete shared visual system and all ten pages redesigned in graphite, silver and white.
-- Product-focused homepage, CSS device illustration, restrained motion and a responsive layout.
-- Interactive transfer demo: recipient, amount validation, network choice, sample native network fee, review, completion receipt, editing and reset.
-- Spyder Touch scene with replay and reduced-motion support.
-- Complete EN / RU / UZ Latin content, automatic language selection and persistent manual preference.
-- Updated Wallet, Chats, Security, Availability, Help, Chain, Privacy, Terms and 404 pages.
-- Local help search, keyboard-accessible controls, visible focus states and mobile navigation.
-- Versioned asset URLs to avoid stale CSS/JS after deployment.
+## Upload by existing GitHub ZIP workflow
 
-## Confirmed destinations
+**Do not unpack manually if the existing ZIP workflow is installed.**
 
-Edit `site/assets/site-config.js`:
+1. Upload the deliverable archive named `spyder-web-update-v6.0.0.zip` to the repository root of branch `main`.
+2. Keep **exactly one** `spyder-web-update*.zip` in root (remove any old pending archive before upload).
+3. Wait for **SPYDER Web — Unpack** to apply the root-relative files and delete the ZIP.
+4. Wait for **SPYDER Web — Cloudflare Worker** to validate and deploy **Worker `spider-ac`**.
+5. Confirm `https://spyder.ac/`, `/whitepaper.html`, `/coin.html`, `/roadmap.html`, verify Russian & Uzbek, and hard-refresh on iPhone.
 
-```js
-window.SPYDER_CONFIG = Object.freeze({
-  iosUrl: '',      // verified https://apps.apple.com/... or https://testflight.apple.com/...
-  androidUrl: '',  // verified https://play.google.com/store/apps/details?id=...
-  supportUrl: ''   // verified https://... or mailto:...
-});
-```
+**No `.github` directory is included in this content update**. Existing workflows, Cloudflare secrets, Worker identity and domain routes remain unchanged. Uploading the ZIP does not alter `spyderchain.org` DNS or automatically publish to that domain.
 
-Blank values show accurate pending states; the site never invents a download or reports a submitted request. Download hosts are checked before links become visible. Do not put API keys or secrets here.
+## Source edits
 
-The source archive did not supply installation links, a direct support contact, a waitlist endpoint, operator details, independently verified wallet custody/recovery documentation, an audit or production network support. These remain unclaimed. There is no waitlist form and no real financial transaction. The homepage uses an explicitly labeled UI concept, not screenshots of a verified native app.
+Public HTML is generated from `scripts/build_pages.py`. Edit that script (not the generated HTML) to change content permanently.
 
-## Edit and regenerate
-
-All public HTML pages are generated by `scripts/build_pages.py`. Change that source for persistent content edits, then run:
-
-```sh
+```bash
 python3 scripts/build_pages.py
 python3 scripts/validate_site.py
 node scripts/test_interactions.cjs
-```
-
-CSS, JavaScript, config, assets and headers are maintained directly. No Node package installation is required. The DOM contract tests invoke Python's standard HTML parser and run the actual app script with a minimal DOM adapter. They are logic tests, not a full browser implementation.
-
-Preview from the repository root:
-
-```sh
 python3 -m http.server 8000 --directory site
 ```
 
-Open http://localhost:8000. Use HTTP serving rather than opening HTML as local files because asset paths are root-relative.
+CSS: `site/assets/styles.css`; JS: `site/assets/app.js`; official store/support URLs: `site/assets/site-config.js`. Leave unverified URLs blank. Images are existing Spyder brand assets; social sharing image is refreshed (`site/assets/og-spyder.png`). No CDN or font downloads.
 
-## Verification scope
+The site's tokenomics scenario assumes 100K–5M transactions/day, USD-equivalent fee $0.005 and validator fee share 90%, strictly for mathematical illustration, not a forecast, proposal for actual mainnet tariffs or recommendation to buy SPD.
 
-Passed: HTML/link/fragment/resource checks, all translation attributes, JS syntax, and 78 interaction assertions (validation, review, confirmation, reset during pending transfer, language state, Touch replay, mobile-menu state, help search, unavailable destinations, safe configured destinations, and storage unavailable).
+## Publish verification
 
-Browser rendering was blocked in the authoring environment. Real-browser screenshots, responsive overflow measurements and device testing have NOT been completed. Before publication review at 320, 375, 390, 768 and 1440 px, particularly RU headings, keyboard behavior and expanded demo panels. No production deployment was performed.
+- Static HTML validator: 13 pages, canonical URLs, sitemap, EN/RU/UZ attributes and local links.
+- DOM contract tests: 73 assertions including navigation, locale, simulated annual fees, safe official download hosts and storage failure.
+- Headless Chromium DOM and responsive checks: 13 pages × 390/768/1440 px = 39 viewports, no horizontal overflow or JS runtime errors, tested in an isolated in-memory preview.
+- Screenshots: desktop/mobile visual review was performed in the authoring environment; live-domain rendering and real iPhone device testing have **not** been performed.
+- No production deploy or Cloudflare credential access was performed.
 
-## Privacy and security boundaries
+## Known follow-ups
 
-The website uses localStorage only for the language preference. Demo amounts and help queries stay in browser memory. No wallet connection, key entry, backend submission or analytics is implemented. The existing `_headers` protections remain present. Complete the mobile app's actual operator, privacy, custody and recovery documentation before enabling real user funds or collecting visitor submissions.
+1. Before live financial operation: audit the production code, validate custody/recovery model, test independent validators and update legal documentation.
+2. When official app listings exist: enter verified URL(s) into `site/assets/site-config.js`.
+3. For `spyderchain.org`: configure its own domain route/site deployment deliberately; do not route it to unfinished services.
+4. When new Whitepapers are archived: update publication DOI, citations, dates, model labels and links in `scripts/build_pages.py` together, rebuild, and deploy a new version.
